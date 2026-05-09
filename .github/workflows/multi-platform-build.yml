@@ -1,0 +1,155 @@
+name: Multi-platform build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            skia_arch: x64
+            skia_library: skia.lib
+            artifact_path: build/bin/aseprite.exe
+            artifact_name: aseprite-windows-x64
+          - name: macOS arm64
+            os: macos-latest
+            skia_arch: arm64
+            skia_library: libskia.a
+            artifact_path: build/bin/aseprite
+            artifact_name: aseprite-macos-arm64
+          - name: Linux x64
+            os: ubuntu-20.04
+            skia_arch: x64
+            skia_library: libskia.a
+            artifact_path: build/bin/aseprite
+            artifact_name: aseprite-linux-x64
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            g++ clang cmake ninja-build \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libgl1-mesa-dev libfontconfig1-dev
+
+      - name: Install Ninja
+        uses: aseprite/get-ninja@main
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download Skia
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            workspace=$(cygpath "${{ github.workspace }}")
+          else
+            workspace="${{ github.workspace }}"
+          fi
+
+          skia_url=$(source "$workspace/laf/misc/skia-url.sh" | xargs)
+          skia_file=$(basename "$skia_url")
+          curl --ssl-revoke-best-effort -L -o "$skia_file" "$skia_url"
+          unzip -q "$skia_file" -d skia
+
+      - name: Configure CMake
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            skia_dir=$(cygpath -m "$PWD/skia")
+            skia_library_dir=$(cygpath -m "$PWD/skia/out/Release-${{ matrix.skia_arch }}")
+            skia_library="$skia_library_dir/${{ matrix.skia_library }}"
+          else
+            skia_dir="$PWD/skia"
+            skia_library_dir="$PWD/skia/out/Release-${{ matrix.skia_arch }}"
+            skia_library="$skia_library_dir/${{ matrix.skia_library }}"
+          fi
+
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DLAF_BACKEND=skia \
+            -DSKIA_DIR="$skia_dir" \
+            -DSKIA_LIBRARY_DIR="$skia_library_dir" \
+            -DSKIA_LIBRARY="$skia_library" \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.skia_arch }} \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build Aseprite
+        shell: bash
+        run: cmake --build build --target aseprite --parallel
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "${{ matrix.artifact_path }}" "dist/${{ matrix.artifact_name }}.exe"
+          else
+            cp "${{ matrix.artifact_path }}" "dist/${{ matrix.artifact_name }}"
+            chmod +x "dist/${{ matrix.artifact_name }}"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Move release tag
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -f latest-sync ${{ github.sha }}
+          git push -f origin latest-sync
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-sync
+          name: Latest sync build
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: true
+          files: dist/*
