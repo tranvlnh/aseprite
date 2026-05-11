@@ -101,5 +101,5 @@ jobs:
           name: Latest sync build
           target_commitish: ${{ github.sha }}
           draft: false
-          prerelease: true
+          prerelease: false
           files: dist/*
