@@ -2,8 +2,9 @@ name: release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -81,4 +82,12 @@ jobs:
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: sync-latest
+          name: Sync Latest Build
+          body: |
+            Auto build from sync on `${{ github.ref_name }}`.
+            Commit: `${{ github.sha }}`
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
           files: release-assets/*
