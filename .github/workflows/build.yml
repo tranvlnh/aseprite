@@ -67,7 +67,6 @@ jobs:
           $requiredFiles = @(
             "aseprite.exe",
             "icudtl.dat",
-            "data/aseprite.ini",
             "data/strings/en.ini",
             "data/extensions/aseprite-theme/package.json",
             "data/README.md",
