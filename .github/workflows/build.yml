@@ -1,5 +1,8 @@
 name: build
 on: [push, pull_request]
+permissions:
+  contents: write
+  workflows: write
 jobs:
   build:
     runs-on: ${{ matrix.os }}
