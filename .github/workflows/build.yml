@@ -57,17 +57,37 @@ jobs:
         shell: bash
         run: cmake --build build --target aseprite --parallel
 
-      - name: Prepare artifact
-        shell: bash
+      - name: Package portable Aseprite
+        shell: pwsh
         run: |
-          mkdir -p dist
-          cp "build/bin/aseprite.exe" "dist/aseprite-windows-x64.exe"
+          $packageDir = "dist/aseprite-windows-x64"
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+          Copy-Item -Path "build/bin/*" -Destination $packageDir -Recurse -Force
+
+          $requiredFiles = @(
+            "aseprite.exe",
+            "icudtl.dat",
+            "data/aseprite.ini",
+            "data/strings/en.ini",
+            "data/extensions/aseprite-theme/package.json",
+            "data/README.md",
+            "data/AUTHORS.md",
+            "data/EULA.txt",
+            "data/docs/LICENSES.md"
+          )
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath "$packageDir/$file" -PathType Leaf)) {
+              throw "Required package file is missing: $file"
+            }
+          }
+
+          Compress-Archive -Path $packageDir -DestinationPath "dist/aseprite-windows-x64.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: aseprite-windows-x64
-          path: dist/*
+          path: dist/aseprite-windows-x64.zip
           if-no-files-found: error
 
   release:
@@ -102,4 +122,5 @@ jobs:
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: false
-          files: dist/*
+          files: dist/aseprite-windows-x64.zip
+          fail_on_unmatched_files: true
